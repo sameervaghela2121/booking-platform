@@ -1,24 +1,26 @@
-
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import { Booking, BookingFormData } from '@/types/booking';
 import { useAuth } from './AuthContext';
+import { bookingApi, handleApiError } from '@/services/api';
 
 // API URL
-const API_URL = 'http://localhost:5000/api';
+const API_URL = 'http://localhost:5001/api';
 
 // Booking state interface
 interface BookingState {
   bookings: Booking[];
   isLoading: boolean;
   error: string | null;
+  initialized: boolean;
 }
 
 // Initial booking state
 const initialState: BookingState = {
   bookings: [],
   isLoading: false,
-  error: null
+  error: null,
+  initialized: false
 };
 
 // Booking action types
@@ -28,6 +30,7 @@ type BookingAction =
   | { type: 'FETCH_FAIL'; payload: string }
   | { type: 'ADD_SUCCESS'; payload: Booking }
   | { type: 'DELETE_SUCCESS'; payload: string }
+  | { type: 'SET_INITIALIZED' }
   | { type: 'CLEAR_ERROR' };
 
 // Booking reducer
@@ -66,6 +69,11 @@ const bookingReducer = (state: BookingState, action: BookingAction): BookingStat
         isLoading: false,
         error: null
       };
+    case 'SET_INITIALIZED':
+      return {
+        ...state,
+        initialized: true
+      };
     case 'CLEAR_ERROR':
       return {
         ...state,
@@ -97,205 +105,128 @@ export const BookingProvider: React.FC<BookingProviderProps> = ({ children }) =>
   const { authState } = useAuth();
   const { toast } = useToast();
 
-  // Fetch bookings when authenticated
-  useEffect(() => {
-    if (authState.isAuthenticated) {
-      fetchBookings();
-    }
-  }, [authState.isAuthenticated]);
-
   // Fetch bookings
-  const fetchBookings = async (): Promise<void> => {
+  const fetchBookings = useCallback(async (): Promise<void> => {
     if (!authState.isAuthenticated) return;
     
     dispatch({ type: 'FETCH_START' });
     
     try {
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-      
-      const response = await fetch(`${API_URL}/bookings`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(result.error?.message || 'Failed to fetch bookings');
-      }
-      
-      // Convert date strings to Date objects
-      const bookings = result.bookings.map((booking: any) => ({
-        ...booking,
-        bookingDate: new Date(booking.bookingDate),
-        createdAt: new Date(booking.createdAt)
-      }));
-      
+      const bookings = await bookingApi.getBookings();
       dispatch({
         type: 'FETCH_SUCCESS',
         payload: bookings
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch bookings';
-      
+      const message = handleApiError(error);
       dispatch({
         type: 'FETCH_FAIL',
         payload: message
       });
-      
       toast({
         title: 'Error',
         description: message,
         variant: 'destructive'
       });
+    } finally {
+      if (!bookingState.initialized) {
+        dispatch({ type: 'SET_INITIALIZED' });
+      }
     }
-  };
+  }, [authState.isAuthenticated, bookingState.initialized, toast]);
+
+  // Initial fetch when authenticated
+  useEffect(() => {
+    if (authState.isAuthenticated && !bookingState.initialized) {
+      fetchBookings();
+    }
+  }, [authState.isAuthenticated, bookingState.initialized, fetchBookings]);
 
   // Add booking
-  const addBooking = async (data: BookingFormData): Promise<void> => {
+  const addBooking = useCallback(async (data: BookingFormData): Promise<void> => {
     if (!authState.isAuthenticated) return;
     
     dispatch({ type: 'FETCH_START' });
     
     try {
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-      
-      const response = await fetch(`${API_URL}/bookings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(data)
-      });
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(result.error?.message || 'Failed to create booking');
-      }
-      
-      // Convert date strings to Date objects
-      const booking = {
-        ...result.booking,
-        bookingDate: new Date(result.booking.bookingDate),
-        createdAt: new Date(result.booking.createdAt)
-      };
-      
+      const booking = await bookingApi.createBooking(data);
       dispatch({
         type: 'ADD_SUCCESS',
         payload: booking
       });
-      
       toast({
-        title: 'Booking Created',
-        description: 'Your booking has been created successfully',
+        title: 'Success',
+        description: 'Booking created successfully',
         variant: 'default'
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create booking';
-      
+      const message = handleApiError(error);
       dispatch({
         type: 'FETCH_FAIL',
         payload: message
       });
-      
       toast({
         title: 'Error',
         description: message,
         variant: 'destructive'
       });
     }
-  };
+  }, [authState.isAuthenticated, toast]);
 
   // Delete booking
-  const deleteBooking = async (id: string): Promise<void> => {
+  const deleteBooking = useCallback(async (id: string): Promise<void> => {
     if (!authState.isAuthenticated) return;
     
     dispatch({ type: 'FETCH_START' });
     
     try {
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-      
-      const response = await fetch(`${API_URL}/bookings/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(result.error?.message || 'Failed to delete booking');
-      }
-      
+      await bookingApi.deleteBooking(id);
       dispatch({
         type: 'DELETE_SUCCESS',
         payload: id
       });
-      
       toast({
-        title: 'Booking Deleted',
-        description: 'Your booking has been deleted successfully',
+        title: 'Success',
+        description: 'Booking deleted successfully',
         variant: 'default'
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete booking';
-      
+      const message = handleApiError(error);
       dispatch({
         type: 'FETCH_FAIL',
         payload: message
       });
-      
       toast({
         title: 'Error',
         description: message,
         variant: 'destructive'
       });
     }
-  };
+  }, [authState.isAuthenticated, toast]);
 
   // Clear error
-  const clearError = (): void => {
+  const clearError = useCallback(() => {
     dispatch({ type: 'CLEAR_ERROR' });
-  };
+  }, []);
 
   return (
-    <BookingContext.Provider
-      value={{
-        bookingState,
-        fetchBookings,
-        addBooking,
-        deleteBooking,
-        clearError
-      }}
-    >
+    <BookingContext.Provider value={{
+      bookingState,
+      fetchBookings,
+      addBooking,
+      deleteBooking,
+      clearError
+    }}>
       {children}
     </BookingContext.Provider>
   );
 };
 
 // Booking context hook
-export const useBooking = (): BookingContextProps => {
+export const useBooking = () => {
   const context = useContext(BookingContext);
-  
   if (!context) {
     throw new Error('useBooking must be used within a BookingProvider');
   }
-  
   return context;
 };

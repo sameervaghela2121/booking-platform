@@ -1,10 +1,9 @@
-
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format } from 'date-fns';
-import { CalendarIcon, Clock } from 'lucide-react';
+import { CalendarIcon, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
@@ -15,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { BookingFormData, BookingType, BookingSlot } from '@/types/booking';
 import { useBooking } from '@/contexts/BookingContext';
+import { useToast } from '@/components/ui/use-toast';
 
 // Form validation schema
 const bookingSchema = z.object({
@@ -28,12 +28,24 @@ const bookingSchema = z.object({
   }),
   bookingSlot: z.enum(['First Half', 'Second Half'] as const).optional(),
   bookingTime: z.string().optional(),
+}).refine((data) => {
+  if (data.bookingType === 'Half Day' && !data.bookingSlot) {
+    return false;
+  }
+  if (data.bookingType === 'Custom' && !data.bookingTime) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Please fill in all required fields",
+  path: ['bookingType']
 });
 
 type BookingFormValues = z.infer<typeof bookingSchema>;
 
 const BookingForm: React.FC = () => {
-  const { addBooking } = useBooking();
+  const { bookingState, addBooking } = useBooking();
+  const { toast } = useToast();
   const [isBookingCreated, setIsBookingCreated] = useState(false);
   
   const form = useForm<BookingFormValues>({
@@ -53,12 +65,21 @@ const BookingForm: React.FC = () => {
       setIsBookingCreated(true);
       form.reset();
     } catch (error) {
-      // Error is handled in the booking context
+      toast({
+        title: "Error",
+        description: "Failed to create booking. Please try again.",
+        variant: "destructive",
+      });
     }
   };
   
   const handleNewBooking = () => {
     setIsBookingCreated(false);
+    form.reset({
+      customerName: '',
+      customerEmail: '',
+      bookingType: 'Full Day',
+    });
   };
   
   // Generate time options for the custom booking
@@ -95,7 +116,7 @@ const BookingForm: React.FC = () => {
                   <FormItem>
                     <FormLabel>Customer Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="John Doe" {...field} />
+                      <Input placeholder="John Doe" {...field} disabled={bookingState.isLoading} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -109,7 +130,12 @@ const BookingForm: React.FC = () => {
                   <FormItem>
                     <FormLabel>Customer Email</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="john.doe@example.com" {...field} />
+                      <Input 
+                        type="email" 
+                        placeholder="john.doe@example.com" 
+                        {...field} 
+                        disabled={bookingState.isLoading}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -131,6 +157,7 @@ const BookingForm: React.FC = () => {
                               "w-full pl-3 text-left font-normal",
                               !field.value && "text-muted-foreground"
                             )}
+                            disabled={bookingState.isLoading}
                           >
                             {field.value ? (
                               format(field.value, "PPP")
@@ -146,7 +173,9 @@ const BookingForm: React.FC = () => {
                           mode="single"
                           selected={field.value}
                           onSelect={field.onChange}
-                          disabled={(date) => date < new Date()}
+                          disabled={(date) => 
+                            date < new Date() || bookingState.isLoading
+                          }
                           initialFocus
                           className={cn("p-3 pointer-events-auto")}
                         />
@@ -167,6 +196,7 @@ const BookingForm: React.FC = () => {
                       onValueChange={field.onChange} 
                       defaultValue={field.value}
                       value={field.value}
+                      disabled={bookingState.isLoading}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -194,6 +224,7 @@ const BookingForm: React.FC = () => {
                       <Select 
                         onValueChange={field.onChange} 
                         defaultValue={field.value}
+                        disabled={bookingState.isLoading}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -221,14 +252,13 @@ const BookingForm: React.FC = () => {
                       <Select 
                         onValueChange={field.onChange} 
                         defaultValue={field.value}
+                        disabled={bookingState.isLoading}
                       >
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select booking time">
-                              <div className="flex items-center">
-                                <Clock className="mr-2 h-4 w-4" />
-                                <span>{field.value || "Select time"}</span>
-                              </div>
+                              <Clock className="mr-2 h-4 w-4" />
+                              <span>Select time</span>
                             </SelectValue>
                           </SelectTrigger>
                         </FormControl>
@@ -246,8 +276,19 @@ const BookingForm: React.FC = () => {
                 />
               )}
               
-              <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Creating Booking...' : 'Create Booking'}
+              <Button 
+                type="submit" 
+                className="w-full"
+                disabled={bookingState.isLoading}
+              >
+                {bookingState.isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating Booking...
+                  </>
+                ) : (
+                  'Create Booking'
+                )}
               </Button>
             </form>
           </Form>
